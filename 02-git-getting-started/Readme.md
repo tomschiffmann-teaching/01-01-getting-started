@@ -96,3 +96,4 @@ In dieser Aufgabe legst du ein Repository an und erstellst deine ersten Commits 
 - Was bedeutet das **U** bzw. das **M** neben einer Datei in der Quellcodeverwaltung?
 - Warum braucht jeder Commit eine Nachricht?
 - Welchen Git-Befehlen entsprechen die Buttons **Repository initialisieren**, **+** und **Commit**?
+- Was machen git push und git clone?
