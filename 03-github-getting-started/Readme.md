@@ -26,17 +26,17 @@ Ein Remote ist die Verbindung von deinem lokalen Repository zu einem Repository 
 
 ## SSH – warum überhaupt?
 
-Damit GitHub weiß, dass wirklich *du* etwas hochlädst, musst du dich anmelden. Dafür gibt es zwei Wege:
+Damit GitHub weiß, dass wirklich _du_ etwas hochlädst, musst du dich anmelden. Dafür gibt es zwei Wege:
 
 - **HTTPS**: Du musst bei jedem Push einen Token (eine Art Passwort) eingeben
 - **SSH**: Du hinterlegst einmalig einen digitalen Schlüssel – danach funktioniert alles automatisch
 
 SSH funktioniert mit einem **Schlüsselpaar**:
 
-| Schlüssel                        | Wo liegt er?           | Vergleich       |
-| -------------------------------- | ---------------------- | --------------- |
-| **Privater Schlüssel** (`id_ed25519`)     | Nur bei dir in der WSL | Dein Hausschlüssel – **niemals weitergeben!** |
-| **Öffentlicher Schlüssel** (`id_ed25519.pub`) | Wird bei GitHub hinterlegt | Das Türschloss – darf jeder sehen |
+| Schlüssel                                     | Wo liegt er?               | Vergleich                                     |
+| --------------------------------------------- | -------------------------- | --------------------------------------------- |
+| **Privater Schlüssel** (`id_ed25519`)         | Nur bei dir in der WSL     | Dein Hausschlüssel – **niemals weitergeben!** |
+| **Öffentlicher Schlüssel** (`id_ed25519.pub`) | Wird bei GitHub hinterlegt | Das Türschloss – darf jeder sehen             |
 
 GitHub prüft bei jeder Verbindung, ob dein privater Schlüssel zum hinterlegten öffentlichen Schlüssel passt. Nur dann darfst du pushen. Ein Passwort wird nie übertragen.
 
@@ -150,3 +150,4 @@ Ab jetzt kannst du wie in Kapitel 02 über die **Quellcodeverwaltung** arbeiten.
 - Was ist der Unterschied zwischen `git commit` und `git push`?
 - Wofür steht `origin`?
 - Woran erkennst du, ob eine Repository-Adresse SSH oder HTTPS ist?
+- Was ist Github?
