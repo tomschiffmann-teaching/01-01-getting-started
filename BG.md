@@ -1,3 +1,0 @@
-# Background Color
-
-Green
