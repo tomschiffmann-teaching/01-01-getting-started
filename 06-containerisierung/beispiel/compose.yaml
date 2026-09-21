@@ -1,0 +1,30 @@
+# Starten:  docker compose up -d --build
+# Status:   docker compose ps
+# Logs:     docker compose logs -f
+# Stoppen:  docker compose down
+
+services:
+  # Unsere eigene Webseite – wird aus dem Dockerfile in diesem Ordner gebaut
+  webseite:
+    build: .
+    # Name des gebauten Images. Für Docker Hub: <dein-username>/meine-webseite:1.0
+    # (dann klappt auch: docker compose push)
+    image: meine-webseite:1.0
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  # Ein fertiges Image von Docker Hub (Apache-Webserver) – wird nicht gebaut, nur heruntergeladen
+  apache:
+    image: httpd:alpine
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    # Ressourcen begrenzen: Der Container darf höchstens 64 MB Arbeitsspeicher
+    # und eine halbe CPU verwenden. Braucht er mehr RAM, wird er beendet (OOM).
+    # Prüfen mit: docker stats   (Spalte "MEM USAGE / LIMIT")
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.5"
