@@ -86,7 +86,7 @@ Beides sorgt dafür, dass Anwendungen voneinander getrennt laufen. Der große Un
 ## Voraussetzungen
 
 - **WSL mit Ubuntu** (siehe Kapitel 01)
-- Eine **laufende EC2-Instanz** mit Ubuntu, auf die du dich per SSH verbinden kannst, und einer Security Group, die Port `80` erlaubt (siehe Kapitel 05)
+- Zugang zur **AWS-Konsole** und Erfahrung mit dem Erstellen einer EC2-Instanz (siehe Kapitel 05). In Aufgabe 5 legst du ein **eigenes VPC** an und startest darin eine **neue Instanz** in einem **öffentlichen Subnetz**
 - Eine E-Mail-Adresse für den **Docker Hub**-Account
 - Grundlegende Linux-Befehle und `nano` (siehe Haupt-Readme und Kapitel 05)
 
@@ -589,19 +589,99 @@ Neue Repositories sind bei Docker Hub standardmäßig **Public** – jeder kann 
 
 Jetzt kommt alles zusammen: Dein Image aus Docker Hub läuft auf deinem Server in der Cloud.
 
-### Schritt 1: Instanz starten und verbinden
+Diesmal baust du dir dafür das **Netzwerk selbst**: ein **eigenes VPC** mit einem **öffentlichen Subnetz**. Erst dann startest du darin eine neue EC2-Instanz. So siehst du genau, warum dein Server aus dem Internet erreichbar ist – und was passiert, wenn er es nicht ist.
 
-1. In der AWS-Konsole (Region **us-east-1**) prüfen, ob deine Instanz **Running** ist. Falls sie gestoppt ist: **Instance state** → **Start instance**
-2. Die **Public IPv4 address** kopieren – sie hat sich nach einem Neustart **geändert**!
+```
+                         AWS Cloud (us-east-1)
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  dein VPC  10.0.0.0/16                                           │
+ │  ┌──────────────────────────────┐  ┌───────────────────────────┐ │
+ │  │ Öffentliches Subnetz         │  │ Privates Subnetz          │ │
+ │  │ 10.0.0.0/20                  │  │ 10.0.128.0/20             │ │
+ │  │  ┌────────────────────────┐  │  │                           │ │
+ │  │  │ EC2 + Docker-Container │  │  │  (heute leer – hier       │ │
+ │  │  │ Public IP: 3.x.x.x     │  │  │   käme z. B. eine DB hin) │ │
+ │  │  └───────────┬────────────┘  │  │                           │ │
+ │  └──────────────┼───────────────┘  └───────────────────────────┘ │
+ │   Route 0.0.0.0/0 ──▶ Internet Gateway (IGW)                     │
+ └──────────────────────────┼───────────────────────────────────────┘
+                            ▼
+                         Internet ◀── Browser / SSH von deinem Laptop
+```
+
+### Schritt 1: Ein eigenes VPC anlegen („VPC and more“)
+
+Ein **VPC** (_Virtual Private Cloud_) ist dein eigenes, abgeschottetes Netzwerk in AWS. Bisher hast du entweder das **Default-VPC** oder ein vorbereitetes VPC verwendet – jetzt legst du selbst eines an. Der Assistent **VPC and more** erstellt dir dabei alles auf einmal: VPC, Subnetze, Route Tables und das Internet Gateway.
+
+1. In der [AWS-Konsole](https://console.aws.amazon.com) anmelden und oben rechts die Region **US (North Virginia) us-east-1** einstellen
+2. Oben in der Suche `VPC` eingeben und den Dienst **VPC** öffnen
+3. Auf **Create VPC** klicken
+4. Bei **Resources to create** die Option **VPC and more** auswählen – **nicht** „VPC only“
+5. Die Einstellungen so wählen:
+   - **Name tag auto-generation**: Haken setzen, Name z. B. `docker-vorname` (AWS benennt damit alle Ressourcen automatisch, z. B. `docker-vorname-vpc`, `docker-vorname-subnet-public1-us-east-1a`)
+   - **IPv4 CIDR block**: `10.0.0.0/16` (Standard, so lassen)
+   - **IPv6 CIDR block**: `No IPv6 CIDR block`
+   - **Tenancy**: `Default`
+   - **Number of Availability Zones (AZs)**: `1` (für den Kurs reicht eine)
+   - **Number of public subnets**: `1`
+   - **Number of private subnets**: `1` (oder `0` – heute brauchen wir es nicht, aber es zeigt schön den Unterschied)
+   - **NAT gateways**: `None` – **wichtig**, ein NAT Gateway kostet **Geld pro Stunde**!
+   - **VPC endpoints**: `None`
+   - **DNS options**: beide Haken (**Enable DNS hostnames** und **Enable DNS resolution**) gesetzt lassen
+6. Rechts in der **Preview** siehst du, was angelegt wird: 1 VPC, 2 Subnetze, 2 Route Tables, 1 Internet Gateway. Dann auf **Create VPC** klicken
+7. Warten, bis alle Schritte einen grünen Haken haben, dann auf **View VPC** klicken
+
+> **Was hat „VPC and more“ für dich erledigt?** Das Wichtigste passiert im Hintergrund: Der Assistent hat ein **Internet Gateway** an dein VPC gehängt und in der Route Table des **öffentlichen** Subnetzes die Route `0.0.0.0/0` → **Internet Gateway** eingetragen. Genau diese eine Route macht ein Subnetz „öffentlich“. Das private Subnetz hat diese Route **nicht** – eine Instanz dort wäre aus dem Internet unerreichbar.
+
+**Kontrolle – ist das Subnetz wirklich öffentlich?**
+
+1. Links im Menü auf **Subnets** klicken
+2. Das Subnetz mit `public` im Namen auswählen (z. B. `docker-vorname-subnet-public1-us-east-1a`)
+3. Unten den Reiter **Route table** öffnen – dort muss eine Zeile `0.0.0.0/0` mit dem Ziel `igw-...` stehen
+4. Zum Vergleich das Subnetz mit `private` im Namen anklicken – hier fehlt diese Zeile
+
+> **Kostet ein VPC etwas?** Nein – VPC, Subnetze, Route Tables und Internet Gateway sind **kostenlos**. Geld kosten nur die Dinge, die darin laufen (EC2-Instanzen) und Extras wie NAT Gateways oder Elastic IPs, die nicht zugeordnet sind.
+
+### Schritt 2: Eine neue EC2-Instanz im öffentlichen Subnetz starten
+
+Eine bestehende Instanz lässt sich **nicht** in ein anderes VPC verschieben. Deshalb startest du jetzt eine **neue** Instanz – genauso wie in Kapitel 05, nur mit **einem entscheidenden Unterschied** bei den Netzwerkeinstellungen.
+
+1. Zum Dienst **EC2** wechseln → **Launch instance**
+2. **Name**: z. B. `docker-server`
+3. **AMI**: `Ubuntu Server 24.04 LTS` (Free tier eligible), **Instance type**: `t2.micro` oder `t3.micro`
+4. **Key pair**: dein vorhandenes Schlüsselpaar aus Kapitel 05 auswählen (z. B. `ec2-kurs-key`)
+5. Bei **Network settings** auf **Edit** klicken – **hier passiert das Wichtige**:
+   - **VPC**: dein neues VPC auswählen (z. B. `docker-vorname-vpc`) – **nicht** das mit `(default)` markierte
+   - **Subnet**: das Subnetz mit **`public`** im Namen auswählen (z. B. `docker-vorname-subnet-public1-us-east-1a`)
+   - **Auto-assign public IP**: auf **Enable** stellen – in selbst angelegten Subnetzen steht das standardmäßig auf **Disable**!
+6. Bei **Firewall (security groups)** → **Create security group**, Name z. B. `docker-sg`, mit zwei Regeln:
+   - **Type** `ssh`, Port `22`, **Source** `My IP` (oder `Anywhere-IPv4`)
+   - **Add security group rule** → **Type** `HTTP`, Port `80`, **Source** `Anywhere-IPv4` (`0.0.0.0/0`)
+7. **Storage**: `8 GiB gp3` so lassen → **Launch instance**
+
+> **Die drei Dinge, die eine Instanz aus dem Internet erreichbar machen:**
+>
+> 1. Sie liegt in einem Subnetz, dessen Route Table `0.0.0.0/0` → **Internet Gateway** kennt (**öffentliches Subnetz**)
+> 2. Sie hat eine **Public IP** (**Auto-assign public IP** = Enable)
+> 3. Die **Security Group** lässt den Port durch (`22` für SSH, `80` für die Webseite)
+>
+> Fehlt **eines** davon, bekommst du bei SSH und im Browser nur `Connection timed out` – ohne weitere Fehlermeldung.
+
+**Kontrolle:** In der Instanzliste die neue Instanz anklicken. Im Reiter **Details** müssen stehen: **VPC ID** = dein VPC, **Subnet ID** = das `public`-Subnetz und eine **Public IPv4 address**. Fehlt die Public IP, hast du **Auto-assign public IP** vergessen – dann die Instanz **terminieren** und Schritt 2 wiederholen.
+
+### Schritt 3: Mit der Instanz verbinden
+
+1. Warten, bis die Instanz **Running** ist und **Status checks** `2/2 checks passed` zeigt
+2. Die **Public IPv4 address** kopieren
 3. In der WSL verbinden:
 
 ```bash
 ssh -i ~/.ssh/ec2-kurs-key.pem ubuntu@<Public-IP>
 ```
 
-Achte auf die Eingabezeile `ubuntu@ip-...` – ab jetzt arbeitest du **auf dem Server**.
+Achte auf die Eingabezeile `ubuntu@ip-10-0-...` – die `10.0.` stammt aus dem CIDR-Block **deines** VPCs. Ab jetzt arbeitest du **auf dem Server**.
 
-### Schritt 2: Docker installieren
+### Schritt 4: Docker installieren
 
 Führe **Aufgabe 1, Schritte 1 bis 7** auf dem Server aus (Schritt 0 gilt nur für die WSL und entfällt hier). Denk an das Ab- und wieder Anmelden nach Schritt 7.
 
@@ -611,9 +691,11 @@ Kontrolle:
 docker run hello-world
 ```
 
-### Schritt 3: nginx aus Kapitel 05 stoppen
+### Schritt 5: nginx aus Kapitel 05 stoppen (nur bei alter Instanz)
 
-Auf dem Server läuft noch das nginx, das du in Kapitel 05 direkt installiert hast. Es belegt **Port 80** – und ein Port kann nur von **einem** Programm gleichzeitig verwendet werden.
+Auf einer **frisch erstellten** Instanz aus Schritt 2 ist kein nginx installiert – diesen Schritt kannst du dann **überspringen**.
+
+Verwendest du doch die Instanz aus Kapitel 05 weiter, läuft dort noch das nginx, das du direkt installiert hast. Es belegt **Port 80** – und ein Port kann nur von **einem** Programm gleichzeitig verwendet werden.
 
 ```bash
 sudo systemctl stop nginx
@@ -623,9 +705,9 @@ sudo systemctl disable nginx
 - `stop` – nginx jetzt beenden
 - `disable` – nginx beim nächsten Neustart des Servers **nicht** automatisch starten
 
-Hast du Kapitel 05 auf einer neuen Instanz übersprungen? Dann meldet der Befehl, dass es `nginx.service` nicht gibt – das ist in Ordnung.
+Meldet der Befehl, dass es `nginx.service` nicht gibt, ist das in Ordnung.
 
-### Schritt 4: Das Image herunterladen
+### Schritt 6: Das Image herunterladen
 
 ```bash
 docker pull <dein-username>/meine-webseite:1.0
@@ -634,7 +716,7 @@ docker images
 
 Ein `docker login` ist hier **nicht nötig**, weil dein Repository öffentlich ist.
 
-### Schritt 5: Den Container starten
+### Schritt 7: Den Container starten
 
 ```bash
 docker run -d -p 80:80 --restart unless-stopped --name webseite <dein-username>/meine-webseite:1.0
@@ -652,17 +734,17 @@ docker ps
 curl localhost
 ```
 
-### Schritt 6: Die Webseite im Browser öffnen 🎉
+### Schritt 8: Die Webseite im Browser öffnen 🎉
 
 ```
 http://<Public-IP>
 ```
 
-Du siehst **deine** Seite mit **Version: 1.0** – gebaut auf deinem Laptop, gespeichert bei Docker Hub, ausgeführt in der Cloud. Du musstest auf dem Server **keine einzige Datei** von Hand bearbeiten.
+Du siehst **deine** Seite mit **Version: 1.0** – gebaut auf deinem Laptop, gespeichert bei Docker Hub, ausgeführt in der Cloud, in **deinem eigenen Netzwerk**. Du musstest auf dem Server **keine einzige Datei** von Hand bearbeiten.
 
 > **Wichtig:** Wie in Kapitel 05 `http://` (**ohne s**) verwenden!
 
-### Schritt 7: Auf Version 2.0 aktualisieren
+### Schritt 9: Auf Version 2.0 aktualisieren
 
 ```bash
 docker pull <dein-username>/meine-webseite:2.0
@@ -807,6 +889,10 @@ Wie in Kapitel 05: Instanz auswählen → **Instance state** → **Stop instance
 
 Dein Image liegt sicher bei Docker Hub – auf einer neuen Instanz bist du mit `docker pull` und `docker run` in wenigen Minuten wieder online.
 
+### Das VPC (optional)
+
+Das VPC selbst kostet nichts, du kannst es also behalten. Willst du es trotzdem löschen: **zuerst** die Instanz **terminieren** (solange eine Instanz darin läuft, lässt sich das VPC nicht löschen), dann im Dienst **VPC** → **Your VPCs** → dein VPC auswählen → **Actions** → **Delete VPC**. AWS löscht Subnetze, Route Tables und Internet Gateway gleich mit.
+
 ### Docker Hub (optional)
 
 - Nicht mehr benötigtes **Access Token** löschen: **Account settings** → **Personal access tokens**
@@ -835,6 +921,9 @@ Dein Image liegt sicher bei Docker Hub – auf einer neuen Instanz bist du mit `
 | Browser zeigt nach `docker build` noch die alte Seite                   | Der **alte Container** läuft noch → stoppen, löschen, mit dem **neuen Tag** neu starten; `Strg + F5` im Browser                            |
 | Browser zeigt „Welcome to nginx!“ statt deiner Seite auf dem Server     | Das nginx aus Kapitel 05 antwortet statt dem Container → `sudo systemctl stop nginx`, dann den Container neu starten                       |
 | `Connection timed out` im Browser auf dem Server                        | `https://` statt `http://` **oder** Port fehlt in der Security Group **oder** neue Public IP nach Neustart nicht übernommen                |
+| `Connection timed out` bei SSH **und** im Browser                       | Instanz liegt im **privaten** Subnetz, oder das Subnetz hat keine Route `0.0.0.0/0` → Internet Gateway → Aufgabe 5, Schritt 1 (Kontrolle) |
+| Instanz hat **keine Public IPv4 address**                               | **Auto-assign public IP** stand beim Erstellen auf Disable → Instanz terminieren und Aufgabe 5, Schritt 2 wiederholen                     |
+| Beim Launch ist mein VPC nicht auswählbar                               | Falsche **Region** – das VPC liegt in `us-east-1`, die Instanz wird in einer anderen Region erstellt → Region oben rechts prüfen           |
 
 ## Kontrollfragen
 
@@ -850,6 +939,9 @@ Dein Image liegt sicher bei Docker Hub – auf einer neuen Instanz bist du mit `
 - Warum musst du ein Image vor dem Push mit `docker tag` umbenennen?
 - Warum verwendest du bei `docker login` ein **Token** statt deines Passworts?
 - Warum brauchst du auf der EC2-Instanz kein `docker login`, um dein Image herunterzuladen?
-- Warum musstest du das nginx aus Kapitel 05 stoppen?
+- Was hat der Assistent **VPC and more** alles für dich angelegt – und welche Route macht ein Subnetz „öffentlich“?
+- Nenne die **drei** Dinge, die zusammenkommen müssen, damit deine Instanz aus dem Internet erreichbar ist.
+- Warum konntest du die Instanz aus Kapitel 05 nicht einfach in dein neues VPC verschieben?
+- Warum musstest du das nginx aus Kapitel 05 stoppen (falls du die alte Instanz weiterverwendet hast)?
 - Was bewirkt `--restart unless-stopped`?
 - Wie machst du auf dem Server ein **Rollback** auf eine ältere Version?
