@@ -848,6 +848,248 @@ Stoppen und entfernen geht genauso einfach: `docker compose down`.
 
 Für ein Update änderst du nur das Tag in `compose.yaml` und führst erneut `docker compose up -d` aus – Compose tauscht den Container automatisch aus.
 
+## Bonusaufgabe: Volumes – Daten, die den Container überleben
+
+### Einleitung: Warum Volumes?
+
+Bisher waren alle Container **zustandslos**: Deine Webseite liegt fertig im Image, der Container liefert sie nur aus. Löscht du ihn, geht nichts verloren, denn beim nächsten `docker run` ist alles wieder da.
+
+Bei einer **Datenbank** sieht das anders aus. Sie schreibt ständig neue Daten auf die Festplatte, und die müssen bleiben, auch wenn der Container gelöscht oder durch eine neue Version ersetzt wird. Genau das kann ein Container von Haus aus **nicht**: Alles, was er zur Laufzeit schreibt, landet in einer dünnen, beschreibbaren Schicht **über** dem Image. Mit `docker rm` ist diese Schicht weg, und mit ihr jede Tabelle, jeder Datensatz.
+
+```
+   ohne Volume                          mit Volume
+ ┌────────────────────┐              ┌────────────────────┐
+ │  Container         │              │  Container         │
+ │  ┌──────────────┐  │              │  ┌──────────────┐  │
+ │  │ schreibbare  │  │  docker rm   │  │ schreibbare  │  │  docker rm
+ │  │ Schicht      │──┼──▶ weg       │  │ Schicht      │──┼──▶ weg
+ │  ├──────────────┤  │              │  ├──────────────┤  │
+ │  │ Image (r/o)  │  │              │  │ Image (r/o)  │  │
+ │  └──────────────┘  │              │  └──────┬───────┘  │
+ └────────────────────┘              └─────────┼──────────┘
+                                               │ /var/lib/postgresql/data
+                                     ┌─────────▼──────────┐
+                                     │  Volume auf dem    │  docker rm
+                                     │  Host              │──▶ bleibt!
+                                     └────────────────────┘
+```
+
+Ein **Volume** ist ein Ordner **außerhalb** des Containers, den Docker an einer bestimmten Stelle **in** den Container einhängt (englisch _mount_). Der Container schreibt ganz normal nach `/var/lib/postgresql/data`, in Wirklichkeit landen die Dateien aber auf dem Host und überleben dort jeden Container.
+
+Es gibt zwei Arten:
+
+| Art              | Schreibweise in Compose               | Wer verwaltet den Ordner? | Typischer Einsatz                                          |
+| ---------------- | ------------------------------------- | ------------------------- | ---------------------------------------------------------- |
+| **Named Volume** | `db-daten:/var/lib/postgresql/data`   | Docker (unter `/var/lib/docker/volumes/`) | Datenbanken, Uploads: Daten, die der Container selbst erzeugt |
+| **Bind Mount**   | `./html:/usr/share/nginx/html`        | Du (ein ganz normaler Ordner auf dem Host) | Konfigurationsdateien, Webseiten während der Entwicklung   |
+
+Links vom Doppelpunkt steht immer die **Host-Seite** (Volume-Name oder Ordner), rechts der **Pfad im Container**. Das Prinzip kennst du schon von `-p 8080:80`.
+
+Die wichtigsten Befehle:
+
+```bash
+docker volume ls                  # alle Volumes anzeigen
+docker volume inspect <name>      # Details, z. B. der Speicherort auf dem Host
+docker volume rm <name>           # Volume löschen (Container muss vorher weg sein)
+```
+
+> **Merke:** `docker rm` und `docker compose down` löschen Container, aber **niemals** Volumes. Erst `docker compose down -v` oder `docker volume rm` entfernt die Daten. Das ist Absicht, denn versehentlich gelöschte Datenbanken sind teuer.
+
+### Aufgabe: PostgreSQL mit Docker Compose auf der EC2-Instanz
+
+Du startest auf deinem Server zwei Container, die miteinander reden: die Datenbank **PostgreSQL** und **Adminer**, eine kleine Web-Oberfläche, mit der du dich von deinem Browser aus mit der Datenbank verbindest. Die Datenbank bekommt ein Volume, damit ihre Daten Container-Neustarts überleben.
+
+```
+   Browser ──▶ :8081 ──▶ ┌─────────┐   db:5432   ┌────────────┐      ┌───────────┐
+                         │ adminer │ ───────────▶ │  postgres  │ ───▶ │ db-daten  │
+                         └─────────┘  Compose-    └────────────┘      │ (Volume)  │
+                                      Netzwerk                        └───────────┘
+```
+
+#### Schritt 1: Port 8081 in der Security Group freigeben
+
+In der AWS-Konsole bei der **Security Group** deiner Instanz eine Regel hinzufügen: **Type** `Custom TCP`, **Port range** `8081`, **Source** `Anywhere-IPv4` (`0.0.0.0/0`).
+
+Port **5432** (PostgreSQL) gibst du **nicht** frei. Die Datenbank soll nur von Adminer erreichbar sein, nicht aus dem Internet.
+
+#### Schritt 2: Die Compose-Datei schreiben
+
+Auf dem **Server** einen neuen Ordner anlegen (getrennt von `~/app`, damit sich die beiden Projekte nicht in die Quere kommen):
+
+```bash
+mkdir -p ~/db-app
+cd ~/db-app
+nano compose.yaml
+```
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: geheim123
+      POSTGRES_DB: kursdb
+    volumes:
+      - db-daten:/var/lib/postgresql/data
+
+  adminer:
+    image: adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
+
+volumes:
+  db-daten:
+```
+
+Neu dabei:
+
+- `environment` – Umgebungsvariablen, mit denen das Postgres-Image beim **ersten** Start Benutzer, Passwort und Datenbank anlegt. Ohne `POSTGRES_PASSWORD` startet der Container gar nicht erst.
+- `volumes` **im Service** – hängt das Volume `db-daten` an den Ordner ein, in dem PostgreSQL seine Daten speichert.
+- `volumes` **ganz unten** – hier meldest du das Named Volume bei Compose an. Ohne diesen Block kennt Compose den Namen nicht.
+- `depends_on` – Compose startet `db` vor `adminer`.
+- `db` hat **keinen** `ports`-Eintrag. Die Datenbank ist trotzdem erreichbar, aber nur für andere Container im selben Compose-Projekt.
+
+> In echten Projekten gehört das Passwort nicht in die `compose.yaml`, sondern in eine Datei `.env`, die nicht ins Git wandert. Für diese Übung reicht es so.
+
+#### Schritt 3: Starten und prüfen
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs db
+```
+
+In den Logs von `db` muss ganz unten stehen: `database system is ready to accept connections`. Beim ersten Start dauert das ein paar Sekunden, weil PostgreSQL die Datenbank erst anlegt.
+
+Jetzt das Volume ansehen:
+
+```bash
+docker volume ls
+docker volume inspect db-app_db-daten
+```
+
+Compose stellt dem Volume-Namen den **Projektnamen** voran (der Ordnername `db-app`). Unter `Mountpoint` siehst du, wo die Daten auf dem Server wirklich liegen.
+
+#### Schritt 4: Mit Adminer verbinden
+
+Im Browser öffnen:
+
+```
+http://<Public-IP>:8081
+```
+
+Im Anmeldeformular eintragen:
+
+| Feld         | Wert         |
+| ------------ | ------------ |
+| **System**   | `PostgreSQL` |
+| **Server**   | `db`         |
+| **Username** | `app`        |
+| **Password** | `geheim123`  |
+| **Database** | `kursdb`     |
+
+Der Server heißt einfach **`db`**, nicht `localhost` und nicht die Public IP. Compose legt für jedes Projekt ein eigenes **Netzwerk** an, in dem jeder Container den anderen unter seinem **Service-Namen** erreicht. Docker löst den Namen `db` intern zur richtigen IP-Adresse auf, wie ein kleines DNS. `localhost` würde hier **nicht** funktionieren, denn aus Sicht des Adminer-Containers ist `localhost` er selbst.
+
+#### Schritt 5: Daten anlegen
+
+In Adminer links auf **SQL command** klicken und ausführen:
+
+```sql
+CREATE TABLE teilnehmer (
+  id   SERIAL PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+INSERT INTO teilnehmer (name) VALUES ('Alice'), ('Bob'), ('<dein Name>');
+
+SELECT * FROM teilnehmer;
+```
+
+Dasselbe geht auch ohne Browser direkt im Container mit dem Kommandozeilen-Client `psql`:
+
+```bash
+docker compose exec db psql -U app -d kursdb -c "SELECT * FROM teilnehmer;"
+```
+
+`docker compose exec` ist das Gegenstück zu `docker exec`, nur mit dem Service-Namen statt dem Container-Namen.
+
+#### Schritt 6: Der Beweis – Container löschen, Daten behalten
+
+Jetzt alle Container des Projekts **löschen** und neu erstellen:
+
+```bash
+docker compose down
+docker compose ps        # leer, die Container sind weg
+docker compose up -d
+docker compose exec db psql -U app -d kursdb -c "SELECT * FROM teilnehmer;"
+```
+
+Alice, Bob und du sind noch da. Die Container waren komplett weg, das Volume nicht.
+
+Zum Vergleich einmal **mit** Volume löschen:
+
+```bash
+docker compose down -v
+docker volume ls         # db-app_db-daten ist verschwunden
+docker compose up -d
+docker compose exec db psql -U app -d kursdb -c "SELECT * FROM teilnehmer;"
+```
+
+Jetzt kommt `relation "teilnehmer" does not exist`. PostgreSQL hat mit dem leeren Volume eine frische Datenbank angelegt.
+
+#### Schritt 7 (optional): Bind Mount für die Webseite
+
+Die zweite Art Volume probierst du an deiner Webseite aus. Wechsle in `~/app` und lege den Ordner für die Seite an:
+
+```bash
+cd ~/app
+mkdir -p html
+docker run --rm <dein-username>/meine-webseite:2.0 cat /usr/share/nginx/html/index.html > html/index.html
+```
+
+Der `docker run`-Befehl startet einen Wegwerf-Container nur, um die `index.html` aus dem Image herauszukopieren.
+
+Dann in `compose.yaml` beim Service `webseite` einen Bind Mount ergänzen:
+
+```yaml
+  webseite:
+    image: <dein-username>/meine-webseite:2.0
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+```
+
+`./html` ist der Ordner neben der `compose.yaml`, `:ro` bedeutet _read-only_: nginx darf lesen, aber nicht schreiben. Bind Mounts brauchen **keinen** Eintrag im unteren `volumes`-Block.
+
+```bash
+docker compose up -d
+nano html/index.html     # z. B. Version: 2.1 eintragen
+```
+
+Browser neu laden (`Strg + F5`): Die Änderung ist **sofort** da, ohne neues Image, ohne `docker pull`, ohne Neustart. Der Ordner auf dem Host **überdeckt** den Ordner im Image.
+
+**Aber Vorsicht:** Damit hast du genau das wieder eingebaut, was du in diesem Kapitel loswerden wolltest: Dateien, die nur auf **diesem** Server liegen und in keinem Image stecken. Bind Mounts sind praktisch zum Entwickeln und für Konfigurationsdateien. Für die eigentliche Anwendung bleibt das Image die richtige Wahl.
+
+#### Aufräumen
+
+```bash
+cd ~/db-app
+docker compose down -v
+```
+
+**Zum Knobeln:**
+
+- Was passiert, wenn du in Schritt 2 das Passwort änderst und `docker compose up -d` erneut ausführst, ohne das Volume zu löschen? Probier es aus und lies `docker compose logs db`.
+- Du willst PostgreSQL von Version 16 auf 17 heben. Reicht es, das Tag im Image zu ändern? Lies dazu die Fehlermeldung in den Logs.
+- Wie würdest du die Tabelle `teilnehmer` sichern, bevor du `docker compose down -v` ausführst? Stichwort: `pg_dump`.
+
 ---
 
 ## Befehlsübersicht
