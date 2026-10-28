@@ -1,0 +1,100 @@
+name: Terraform Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Nie zwei Deployments gleichzeitig – das zweite wartet, bis das erste fertig ist
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+  TF_VAR_vorname: ${{ vars.VORNAME }}
+  TF_VAR_key_name: ${{ vars.KEY_NAME }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: Plan (Produktion)
+    runs-on: ubuntu-latest
+    outputs:
+      aenderungen: ${{ steps.plan.outputs.aenderungen }}
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Terraform installieren
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      # Exit-Codes von -detailed-exitcode: 0 = keine Änderungen, 1 = Fehler, 2 = Änderungen
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -out=tfplan
+          exitcode=$?
+          set -e
+          if [ "$exitcode" -eq 1 ]; then
+            exit 1
+          fi
+          if [ "$exitcode" -eq 2 ]; then
+            echo "aenderungen=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "aenderungen=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Plan in die Zusammenfassung schreiben
+        run: |
+          echo "## Terraform Plan (Produktion)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          terraform show -no-color tfplan >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Plan-Datei für den Apply-Job aufheben
+        if: steps.plan.outputs.aenderungen == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+          retention-days: 1
+
+  apply:
+    name: Apply (Produktion)
+    needs: plan
+    if: needs.plan.outputs.aenderungen == 'true'
+    runs-on: ubuntu-latest
+    # Hier greift die Schutzregel: Der Job wartet auf eine Freigabe
+    environment: production
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Terraform installieren
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Plan-Datei holen
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - name: Apply
+        run: terraform apply -input=false tfplan
+
+      - name: Outputs anzeigen
+        run: terraform output

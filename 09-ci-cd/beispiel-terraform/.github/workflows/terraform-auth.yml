@@ -20,16 +20,25 @@ jobs:
       - name: Code auschecken
         uses: actions/checkout@v5
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Sind die Zugangsdaten gesetzt?
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "::error::AWS_ACCESS_KEY_ID oder AWS_SECRET_ACCESS_KEY fehlt – bitte als Secret hinterlegen!"
+            exit 1
+          fi
+          echo "Access Key ID: $AWS_ACCESS_KEY_ID"
+          echo "Region:        $AWS_REGION"
+
+      - name: AWS CLI – wer bin ich?
+        run: aws sts get-caller-identity
+
+      - name: Terraform installieren
+        uses: hashicorp/setup-terraform@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          terraform_wrapper: false
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
+      - name: Terraform – wer bin ich?
+        working-directory: auth-check
+        run: |
+          terraform init -input=false
+          terraform plan -input=false

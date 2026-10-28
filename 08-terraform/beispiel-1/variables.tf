@@ -9,7 +9,7 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-variable "key_name" {
+variable "key_name"        {
   description = "Name des Schlüsselpaars, das du in der AWS-Konsole angelegt hast"
   type        = string
   default     = "<DEIN_SCHLUESSELPAAR_NAME>"
