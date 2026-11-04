@@ -6,6 +6,18 @@
   "scripts": {
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "test:coverage": "node --test --experimental-test-coverage"
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "rm -rf dist && mkdir dist && cp -r src package.json dist/",
+    "deploy": "npm run build && echo \"🚀 Simulierter Deploy: Inhalt von dist/ wird ausgerollt ...\" && echo \"✅ Deploy erfolgreich (simuliert)\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10"
   }
 }
