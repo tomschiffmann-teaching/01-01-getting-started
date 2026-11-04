@@ -1,6 +1,7 @@
 // Einfache, "reine" Funktionen – ideal zum Einstieg ins Unit Testing
 
 export function add(a, b) {
+  console.log("add() aufgerufen mit:", a, b);
   return a + b;
 }
 

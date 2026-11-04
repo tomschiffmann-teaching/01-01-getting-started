@@ -30,16 +30,16 @@ npm run test:coverage   # Testabdeckung anzeigen
 
 ## Wichtige Begriffe
 
-| Begriff | Bedeutung |
-|---|---|
-| `describe` | Gruppiert zusammengehörige Tests |
-| `it` / `test` | Ein einzelner Testfall |
-| `assert.equal` | Vergleicht zwei Werte (`===`) |
-| `assert.deepEqual` | Vergleicht Objekte und Arrays inhaltlich |
-| `assert.throws` | Prüft, dass eine Funktion einen Fehler wirft |
-| `assert.rejects` | Wie `throws`, aber für async Funktionen / Promises |
-| `beforeEach` | Code, der vor jedem Test läuft (z.B. Objekte neu erzeugen) |
-| `mock.fn` | Ersetzt eine echte Abhängigkeit (z.B. DB) durch eine Fake-Funktion |
+| Begriff            | Bedeutung                                                          |
+| ------------------ | ------------------------------------------------------------------ |
+| `describe`         | Gruppiert zusammengehörige Tests                                   |
+| `it` / `test`      | Ein einzelner Testfall                                             |
+| `assert.equal`     | Vergleicht zwei Werte (`===`)                                      |
+| `assert.deepEqual` | Vergleicht Objekte und Arrays inhaltlich                           |
+| `assert.throws`    | Prüft, dass eine Funktion einen Fehler wirft                       |
+| `assert.rejects`   | Wie `throws`, aber für async Funktionen / Promises                 |
+| `beforeEach`       | Code, der vor jedem Test läuft (z.B. Objekte neu erzeugen)         |
+| `mock.fn`          | Ersetzt eine echte Abhängigkeit (z.B. DB) durch eine Fake-Funktion |
 
 ## Übung
 

@@ -1,0 +1,5 @@
+# Diese Dateien werden NICHT an den Docker-Build geschickt
+node_modules
+*.test.js
+Dockerfile
+.dockerignore

@@ -1,0 +1,148 @@
+name: CD
+
+# Läuft bei jedem Push auf main (= nach jedem gemergten Pull Request)
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Nie zwei Deployments gleichzeitig – das zweite wartet
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+  TF_VAR_vorname: ${{ vars.VORNAME }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # -------------------------------------------------------------
+  # 1. Infrastruktur mit Terraform ausrollen (ECR, IAM, VPC, ECS/Fargate)
+  # -------------------------------------------------------------
+  infrastruktur:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    # Werte, die die folgenden Jobs brauchen
+    outputs:
+      ecr_url: ${{ steps.werte.outputs.ecr_url }}
+      ecs_cluster: ${{ steps.werte.outputs.ecs_cluster }}
+      ecs_service: ${{ steps.werte.outputs.ecs_service }}
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Terraform installieren
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      # Der Plan wurde schon im Pull Request geprüft – hier wird ausgerollt
+      - name: Apply
+        run: terraform apply -input=false -auto-approve
+
+      - name: Terraform-Outputs an die nächsten Jobs weitergeben
+        id: werte
+        run: |
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "ecs_cluster=$(terraform output -raw ecs_cluster)"    >> "$GITHUB_OUTPUT"
+          echo "ecs_service=$(terraform output -raw ecs_service)"    >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------
+  # 2. Docker-Image bauen und nach ECR pushen
+  # -------------------------------------------------------------
+  build-push:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: infrastruktur
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    env:
+      ECR_URL: ${{ needs.infrastruktur.outputs.ecr_url }}
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      # Registry = alles vor dem ersten "/" der Repository-URL
+      - name: Bei ECR anmelden
+        run: |
+          REGISTRY="${ECR_URL%%/*}"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Image bauen
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${{ github.sha }} \
+            -t "$ECR_URL:${{ github.sha }}" \
+            -t "$ECR_URL:latest" \
+            app
+
+      - name: Image pushen
+        id: push
+        run: |
+          docker push "$ECR_URL:${{ github.sha }}"
+          docker push "$ECR_URL:latest"
+          echo "image=$ECR_URL:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------
+  # 3. Fargate anweisen, die Tasks mit dem neuen Image neu zu starten
+  # -------------------------------------------------------------
+  deploy-fargate:
+    name: Deploy auf Fargate
+    runs-on: ubuntu-latest
+    needs: [infrastruktur, build-push]
+    env:
+      CLUSTER: ${{ needs.infrastruktur.outputs.ecs_cluster }}
+      SERVICE: ${{ needs.infrastruktur.outputs.ecs_service }}
+    steps:
+      # Die Task Definition zeigt auf ":latest" – sie ändert sich also nicht.
+      # --force-new-deployment startet trotzdem neue Tasks, die das neue Image ziehen.
+      - name: Neues Deployment starten
+        run: |
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --query "service.deployments[0].id" --output text
+
+      - name: Warten, bis der Service stabil ist
+        run: aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      # Ohne Load Balancer hat jeder Task seine eigene, wechselnde öffentliche IP
+      - name: Öffentliche IP des Tasks herausfinden
+        id: ip
+        run: |
+          TASK_ARN=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" \
+            --desired-status RUNNING --query "taskArns[0]" --output text)
+          ENI_ID=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
+          IP=$(aws ec2 describe-network-interfaces --network-interface-ids "$ENI_ID" \
+            --query "NetworkInterfaces[0].Association.PublicIp" --output text)
+          echo "Task: $TASK_ARN"
+          echo "IP:   $IP"
+          echo "url=http://$IP:3000" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-Test – läuft die neue Version?
+        env:
+          WEBAPP_URL: ${{ steps.ip.outputs.url }}
+        run: |
+          for i in $(seq 1 12); do
+            if curl --fail --silent "$WEBAPP_URL/health" | grep -q "${{ github.sha }}"; then
+              echo "✅ Version ${{ github.sha }} läuft: $WEBAPP_URL"
+              echo "### 🚀 Web-App läuft auf Fargate: $WEBAPP_URL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::$WEBAPP_URL liefert nicht die Version ${{ github.sha }}"
+          exit 1

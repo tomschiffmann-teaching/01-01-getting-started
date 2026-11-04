@@ -1,0 +1,109 @@
+name: CI
+
+# Läuft bei jedem Pull Request nach main – und per Knopfdruck
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+  TF_VAR_vorname: ${{ vars.VORNAME }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # -------------------------------------------------------------
+  # 1. Die App selbst testen
+  # -------------------------------------------------------------
+  app-test:
+    name: App testen
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Node.js installieren
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Unit-Tests
+        run: npm test
+
+  # -------------------------------------------------------------
+  # 2. Das Docker-Image bauen und den Container kurz ausprobieren
+  # -------------------------------------------------------------
+  docker-test:
+    name: Docker-Image testen
+    runs-on: ubuntu-latest
+    needs: app-test
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Image bauen
+        run: docker build --build-arg APP_VERSION=${{ github.sha }} -t webapp:test app
+
+      - name: Container starten
+        run: docker run -d --name webapp -p 8080:3000 -e PLATTFORM=CI webapp:test
+
+      - name: Antwortet die App?
+        run: |
+          for i in $(seq 1 10); do
+            if curl --fail --silent http://localhost:8080/health; then
+              echo
+              curl --fail --silent http://localhost:8080/ | grep "Hallo aus dem Abschlussprojekt"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Die App hat nicht geantwortet"
+          docker logs webapp
+          exit 1
+
+      - name: Aufräumen
+        if: always()
+        run: docker rm -f webapp
+
+  # -------------------------------------------------------------
+  # 3. Terraform prüfen und zeigen, was sich ändern würde
+  # -------------------------------------------------------------
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Terraform installieren
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Formatierung prüfen
+        run: terraform fmt -check -diff
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Plan in die Zusammenfassung schreiben
+        run: |
+          echo "## Terraform Plan" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          terraform show -no-color tfplan >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

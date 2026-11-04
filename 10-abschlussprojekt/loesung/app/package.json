@@ -1,0 +1,11 @@
+{
+  "name": "abschlussprojekt-webapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Einfache Web-App für das Abschlussprojekt",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

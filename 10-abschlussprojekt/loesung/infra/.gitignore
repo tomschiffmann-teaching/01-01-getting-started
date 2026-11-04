@@ -1,0 +1,40 @@
+# Heruntergeladene Provider – werden mit "terraform init" neu geholt
+.terraform/
+
+# Der State kann Geheimnisse enthalten und gehört nicht in Git
+*.tfstate
+*.tfstate.*
+
+# Absturzprotokolle von Terraform
+crash.log
+crash.*.log
+
+# Variablenwerte können Passwörter oder Keys enthalten
+*.tfvars
+*.tfvars.json
+# Beispieldatei ohne echte Werte darf ins Repo
+!example.tfvars
+
+# Gespeicherte Pläne ("terraform plan -out=...") enthalten ggf. Geheimnisse
+*.tfplan
+tfplan
+
+# Lokale Override-Dateien – nur für den eigenen Rechner gedacht
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Persönliche CLI-Konfiguration
+.terraformrc
+terraform.rc
+
+# Private Schlüssel
+*.pem
+
+# Umgebungsvariablen, z. B. AWS-Zugangsdaten
+.env
+.env.*
+
+# Hinweis: .terraform.lock.hcl wird bewusst NICHT ignoriert.
+# Sie fixiert die Provider-Versionen und gehört ins Repo.
