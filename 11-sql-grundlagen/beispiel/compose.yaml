@@ -1,0 +1,52 @@
+services:
+  # Die Datenbank
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: geheim123
+      POSTGRES_DB: shop
+    ports:
+      # Nur für deinen Laptop: erlaubt das Seed-Skript ohne Docker (Aufgabe 4, Variante B)
+      - "5432:5432"
+    volumes:
+      - db-daten:/var/lib/postgresql/data
+      # Die SQL-Dateien sind im Container unter /sql lesbar (z. B. mit \i /sql/schema.sql)
+      - ./sql:/sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # Web-Oberfläche für die Datenbank: http://localhost:8081
+  adminer:
+    image: adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
+
+  # Das Seed-Skript: läuft NICHT bei "docker compose up", sondern nur mit
+  #   docker compose run --rm seed                  (Beispieldaten)
+  #   docker compose run --rm seed --zufall 5000    (+ 5000 Zufallsbestellungen)
+  seed:
+    image: node:24-alpine
+    profiles: ["seed"]
+    working_dir: /app/seed
+    environment:
+      DATABASE_URL: postgres://app:geheim123@db:5432/shop
+    volumes:
+      - .:/app
+      # node_modules bleibt im Container und landet nicht in deinem Ordner
+      - /app/seed/node_modules
+    # Erst Pakete installieren, dann das Skript starten. "$$@" reicht Argumente wie --zufall 5000 weiter.
+    entrypoint: ["sh", "-c", "npm install --no-audit --no-fund --loglevel=error && node seed.js \"$$@\"", "--"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-daten:

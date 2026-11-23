@@ -1,0 +1,14 @@
+{
+  "name": "shop-seed",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Befüllt die Shop-Datenbank mit Beispieldaten",
+  "main": "seed.js",
+  "scripts": {
+    "seed": "node seed.js",
+    "seed:viel": "node seed.js --zufall 5000"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
