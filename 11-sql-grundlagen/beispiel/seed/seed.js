@@ -13,11 +13,14 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client } = require("pg");
+
 const daten = require("./daten");
 
 // Die Verbindungsdaten kommen aus einer Umgebungsvariable – mit Standardwert für lokal.
 // Aufbau: postgres://<benutzer>:<passwort>@<host>:<port>/<datenbank>
-const DATABASE_URL = process.env.DATABASE_URL || "postgres://app:geheim123@localhost:5432/shop";
+const DATABASE_URL =
+  process.env.DATABASE_URL ||
+  "postgres://postgres:geheim123@localhost:5436/shop";
 
 // "--zufall 5000" aus den Kommandozeilen-Argumenten lesen
 function anzahlZufallsBestellungen() {
@@ -61,7 +64,7 @@ async function main() {
       // Niemals Werte per Template-String in SQL einbauen -> Gefahr von SQL-Injection!
       const ergebnis = await client.query(
         "INSERT INTO kategorien (name) VALUES ($1) RETURNING id",
-        [name]
+        [name],
       );
       kategorieIds[name] = ergebnis.rows[0].id; // RETURNING liefert die neue ID zurück
     }
@@ -74,7 +77,7 @@ async function main() {
         `INSERT INTO produkte (name, preis, lagerbestand, kategorie_id)
          VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [p.name, p.preis, p.lagerbestand, kategorieId]
+        [p.name, p.preis, p.lagerbestand, kategorieId],
       );
       produkte[p.name] = { id: ergebnis.rows[0].id, preis: p.preis };
     }
@@ -86,17 +89,23 @@ async function main() {
         `INSERT INTO kunden (vorname, nachname, email, stadt, registriert_am)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [k.vorname, k.nachname, k.email, k.stadt, k.registriert_am]
+        [k.vorname, k.nachname, k.email, k.stadt, k.registriert_am],
       );
       kundenIds[k.email] = ergebnis.rows[0].id;
     }
 
     // Bestellungen und ihre Positionen
     for (const b of daten.bestellungen) {
-      await bestellungAnlegen(client, kundenIds[b.kunde], b.bestellt_am, b.status, b.positionen.map((pos) => ({
-        produkt: produkte[pos.produkt],
-        menge: pos.menge,
-      })));
+      await bestellungAnlegen(
+        client,
+        kundenIds[b.kunde],
+        b.bestellt_am,
+        b.status,
+        b.positionen.map((pos) => ({
+          produkt: produkte[pos.produkt],
+          menge: pos.menge,
+        })),
+      );
     }
 
     // ---------------------------------------------------------------
@@ -107,16 +116,31 @@ async function main() {
       console.log(`⏳ Erzeuge ${anzahl} zufällige Bestellungen ...`);
       const alleKunden = Object.values(kundenIds);
       const alleProdukte = Object.values(produkte);
-      const stati = ["offen", "bezahlt", "versendet", "versendet", "versendet", "storniert"];
+      const stati = [
+        "offen",
+        "bezahlt",
+        "versendet",
+        "versendet",
+        "versendet",
+        "storniert",
+      ];
 
       for (let i = 0; i < anzahl; i++) {
         // Zufällige Auswahl von 1–4 verschiedenen Produkten
         const gemischt = [...alleProdukte].sort(() => Math.random() - 0.5);
-        const positionen = gemischt.slice(0, zufallsZahl(1, 4)).map((produkt) => ({
-          produkt,
-          menge: zufallsZahl(1, 5),
-        }));
-        await bestellungAnlegen(client, zufallsElement(alleKunden), zufallsDatum(), zufallsElement(stati), positionen);
+        const positionen = gemischt
+          .slice(0, zufallsZahl(1, 4))
+          .map((produkt) => ({
+            produkt,
+            menge: zufallsZahl(1, 5),
+          }));
+        await bestellungAnlegen(
+          client,
+          zufallsElement(alleKunden),
+          zufallsDatum(),
+          zufallsElement(stati),
+          positionen,
+        );
       }
     }
 
@@ -126,17 +150,28 @@ async function main() {
     // ---------------------------------------------------------------
     // Schritt 4: Zur Kontrolle zählen, was jetzt in den Tabellen steht
     // ---------------------------------------------------------------
-    const tabellen = ["kategorien", "produkte", "kunden", "bestellungen", "bestellpositionen"];
+    const tabellen = [
+      "kategorien",
+      "produkte",
+      "kunden",
+      "bestellungen",
+      "bestellpositionen",
+    ];
     console.log("\n📊 Inhalt der Datenbank:");
     for (const tabelle of tabellen) {
       // Tabellennamen kann man NICHT als $1-Platzhalter übergeben. Hier ist das ok,
       // weil die Namen fest im Code stehen und nicht von außen kommen.
-      const { rows } = await client.query(`SELECT COUNT(*) AS anzahl FROM ${tabelle}`);
+      const { rows } = await client.query(
+        `SELECT COUNT(*) AS anzahl FROM ${tabelle}`,
+      );
       console.log(`   ${tabelle.padEnd(18)} ${rows[0].anzahl} Zeilen`);
     }
   } catch (fehler) {
     await client.query("ROLLBACK");
-    console.error("❌ Fehler beim Seeden – alles wurde zurückgerollt:", fehler.message);
+    console.error(
+      "❌ Fehler beim Seeden – alles wurde zurückgerollt:",
+      fehler.message,
+    );
     process.exitCode = 1;
   } finally {
     await client.end();
@@ -145,12 +180,18 @@ async function main() {
 
 // Legt eine Bestellung samt Positionen an.
 // Der Einzelpreis wird aus dem aktuellen Produktpreis übernommen und in der Position gespeichert.
-async function bestellungAnlegen(client, kundeId, bestelltAm, status, positionen) {
+async function bestellungAnlegen(
+  client,
+  kundeId,
+  bestelltAm,
+  status,
+  positionen,
+) {
   const ergebnis = await client.query(
     `INSERT INTO bestellungen (kunde_id, bestellt_am, status)
      VALUES ($1, $2, $3)
      RETURNING id`,
-    [kundeId, bestelltAm, status]
+    [kundeId, bestelltAm, status],
   );
   const bestellungId = ergebnis.rows[0].id;
 
@@ -158,7 +199,7 @@ async function bestellungAnlegen(client, kundeId, bestelltAm, status, positionen
     await client.query(
       `INSERT INTO bestellpositionen (bestellung_id, produkt_id, menge, einzelpreis)
        VALUES ($1, $2, $3, $4)`,
-      [bestellungId, pos.produkt.id, pos.menge, pos.produkt.preis]
+      [bestellungId, pos.produkt.id, pos.menge, pos.produkt.preis],
     );
   }
 }
@@ -175,7 +216,9 @@ function zufallsElement(liste) {
 function zufallsDatum() {
   const start = new Date("2025-01-01").getTime();
   const ende = new Date("2026-11-30").getTime();
-  return new Date(start + Math.random() * (ende - start)).toISOString().slice(0, 10); // "JJJJ-MM-TT"
+  return new Date(start + Math.random() * (ende - start))
+    .toISOString()
+    .slice(0, 10); // "JJJJ-MM-TT"
 }
 
 main();

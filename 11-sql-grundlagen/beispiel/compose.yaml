@@ -15,7 +15,7 @@ services:
       # Die SQL-Dateien sind im Container unter /sql lesbar (z. B. mit \i /sql/schema.sql)
       - ./sql:/sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d shop"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
       interval: 2s
       timeout: 3s
       retries: 15
@@ -37,7 +37,7 @@ services:
     profiles: ["seed"]
     working_dir: /app/seed
     environment:
-      DATABASE_URL: postgres://app:geheim123@db:5432/shop
+      DATABASE_URL: postgres://postgres:geheim123@db:5432/shop
     volumes:
       - .:/app
       # node_modules bleibt im Container und landet nicht in deinem Ordner

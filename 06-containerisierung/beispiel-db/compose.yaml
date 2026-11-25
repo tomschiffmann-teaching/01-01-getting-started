@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: app
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: geheim123
       POSTGRES_DB: kursdb
     volumes:

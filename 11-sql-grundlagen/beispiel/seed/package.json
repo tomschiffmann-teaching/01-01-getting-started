@@ -10,5 +10,8 @@
   },
   "dependencies": {
     "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.6.0"
   }
 }
