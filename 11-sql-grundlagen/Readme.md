@@ -382,7 +382,7 @@ cat compose.yaml
 
 Das meiste kennst du aus Kapitel 06. Neu sind:
 
-- `ports: "5432:5432"` – die Datenbank ist von **deinem Laptop** aus erreichbar (für Variante B in Aufgabe 4 und Programme wie DBeaver). Auf einem Server würdest du das **nicht** machen!
+- `ports: "5432:5432"` – die Datenbank ist von **deinem Laptop** aus erreichbar (für Variante B in Aufgabe 4 und Programme wie den VS-Code-**Database Client** oder DBeaver). Auf einem Server würdest du das **nicht** machen!
 - `./sql:/sql:ro` – der Ordner `sql/` ist im Container unter `/sql` **lesbar** (`ro` = _read only_).
 - `healthcheck` – Docker fragt alle 2 Sekunden mit `pg_isready`, ob die Datenbank schon Verbindungen annimmt. Erst dann gilt der Container als **healthy**.
 - Der Service `seed` hat ein **Profil** (`profiles: ["seed"]`). Dadurch startet er **nicht** bei `docker compose up`, sondern nur, wenn du ihn ausdrücklich aufrufst (Aufgabe 4).
@@ -406,7 +406,7 @@ Die Datenbank `shop` ist jetzt da – aber noch **leer**.
 
 ## Aufgabe 2: Mit der Datenbank verbinden
 
-Es gibt viele Wege, mit einer Datenbank zu sprechen. Wir nutzen zwei: das Kommandozeilen-Programm **psql** (wie ein Profi) und die Web-Oberfläche **Adminer** (zum Durchklicken).
+Es gibt viele Wege, mit einer Datenbank zu sprechen. Wir nutzen das Kommandozeilen-Programm **psql** (wie ein Profi), die Web-Oberfläche **Adminer** (zum Durchklicken) und als Alternative die VS-Code-Erweiterung **Database Client** (alles direkt im Editor).
 
 ### Schritt 1: psql im Container starten
 
@@ -503,6 +503,56 @@ http://localhost:8081
 Warum `db` und nicht `localhost`? Das weißt du aus Kapitel 06: Adminer läuft selbst in einem Container und erreicht die Datenbank über das Compose-Netzwerk unter dem **Service-Namen**.
 
 Über **SQL command** (links) kannst du in Adminer genauso SQL ausführen wie in psql. Such dir aus, was dir lieber ist – alle folgenden Aufgaben funktionieren mit beidem. **psql** ist aber das Werkzeug, das du auf jedem Server findest.
+
+### Schritt 4 (Alternative): Database Client in VS Code
+
+Wer lieber direkt im Editor arbeitet, kann die Erweiterung **Database Client** (Herausgeber: _Database Client_, [database-client.com](https://database-client.com)) installieren. Sie zeigt Tabellen, Spalten, Schlüssel und Daten als **Baum und Tabelle** an – so siehst du sofort, was deine SQL-Befehle in der Datenbank bewirken.
+
+**Installieren:**
+
+1. VS Code aus der WSL öffnen: `code .` im Ordner `11-sql-grundlagen/beispiel`
+2. Links auf **Extensions** klicken (`Strg + Shift + X`)
+3. Nach **`Database Client`** suchen und die Erweiterung mit dem blau-orangen Datenbank-Symbol installieren (bei WSL: **Install in WSL: Ubuntu**)
+
+Alternativ im Terminal der WSL:
+
+```bash
+code --install-extension cweijan.vscode-database-client2
+```
+
+**Verbinden:**
+
+1. In der linken Leiste erscheint ein neues **Datenbank-Symbol** → anklicken
+2. Auf **+** (_Create Connection_) klicken
+3. Als Typ **PostgreSQL** wählen und eintragen:
+
+| Feld         | Wert         |
+| ------------ | ------------ |
+| **Host**     | `127.0.0.1`  |
+| **Port**     | `5432`       |
+| **Username** | `app`        |
+| **Password** | `geheim123`  |
+| **Database** | `shop`       |
+
+4. **Connect** bzw. **Save** klicken
+
+Warum hier `127.0.0.1` und nicht `db`? Die Erweiterung läuft **nicht** im Compose-Netzwerk, sondern direkt in VS Code. Sie erreicht die Datenbank nur über den freigegebenen Port `5432` – genau wie das Seed-Skript in Variante B.
+
+**Damit arbeiten:**
+
+| Was                         | Wie                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| Tabellen ansehen            | Verbindung aufklappen → `shop` → `public` → **Tables**                                       |
+| Daten einer Tabelle anzeigen | Auf den Tabellennamen klicken – die Zeilen erscheinen als Tabelle                           |
+| Aufbau einer Tabelle        | Tabelle aufklappen → Spalten mit Datentyp, Primär- und Fremdschlüssel (wie `\d` in psql)     |
+| SQL ausführen               | Rechtsklick auf die Datenbank → **Open Query** (oder das Notiz-Symbol), SQL eintippen und über **Run** über der Anweisung bzw. `Strg + Enter` ausführen |
+| Ansicht aktualisieren       | Nach `CREATE TABLE`, `DROP TABLE` oder dem Seed-Skript auf das **Refresh**-Symbol klicken      |
+
+> **Tipp:** Lass psql in einem Terminal **und** den Database Client nebeneinander offen. Tippe die Befehle in psql und schau dir danach im Database Client an, wie sich Tabellen und Daten verändert haben. Gerade bei Primär- und Fremdschlüsseln (Aufgabe 4) und JOINs (Aufgabe 7) hilft dieser Blick sehr.
+
+> **Vorsicht:** Im Database Client kannst du Daten auch direkt in der Tabellenansicht ändern und löschen – bequem, aber **ohne** `WHERE`-Kontrolle und ohne Rückgängig. Zum Üben die Änderungen bitte immer als SQL schreiben.
+
+Alle folgenden Aufgaben funktionieren mit psql, Adminer **und** dem Database Client.
 
 ## Aufgabe 3: Deine erste eigene Tabelle
 
@@ -1625,6 +1675,8 @@ docker image rm postgres:17-alpine adminer node:24-alpine
 | Seed-Skript: `password authentication failed for user "app"`        | Das Volume stammt von einem früheren Start mit anderem Passwort. Benutzer/Passwort werden nur beim **allerersten** Start gesetzt → `docker compose down -v`, dann `docker compose up -d` |
 | Seed-Skript: `Cannot find module 'pg'` (Variante B)                  | `npm install` im Ordner `seed/` vergessen                                                                                           |
 | Adminer: `Unable to connect to PostgreSQL server`                    | Als Server `db` eintragen, nicht `localhost`                                                                                        |
+| Database Client (VS Code): `connect ECONNREFUSED 127.0.0.1:5432`     | Container läuft nicht (`docker compose ps`) oder Port anders als `5432` freigegeben → Port in der Verbindung anpassen. Als Host **nicht** `db` eintragen |
+| Database Client zeigt neue Tabellen nicht an                         | Ansicht ist nicht aktualisiert → **Refresh**-Symbol an der Verbindung klicken                                                       |
 | Ergebnis rutscht aus dem Bildschirm / ist unlesbar                   | `\x` für die erweiterte Anzeige; mit `q` die Seitenansicht verlassen                                                                |
 
 ## Kontrollfragen

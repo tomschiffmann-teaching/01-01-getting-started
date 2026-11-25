@@ -4,12 +4,12 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: app
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: geheim123
       POSTGRES_DB: shop
     ports:
       # Nur für deinen Laptop: erlaubt das Seed-Skript ohne Docker (Aufgabe 4, Variante B)
-      - "5432:5432"
+      - "5436:5432"
     volumes:
       - db-daten:/var/lib/postgresql/data
       # Die SQL-Dateien sind im Container unter /sql lesbar (z. B. mit \i /sql/schema.sql)
@@ -43,7 +43,13 @@ services:
       # node_modules bleibt im Container und landet nicht in deinem Ordner
       - /app/seed/node_modules
     # Erst Pakete installieren, dann das Skript starten. "$$@" reicht Argumente wie --zufall 5000 weiter.
-    entrypoint: ["sh", "-c", "npm install --no-audit --no-fund --loglevel=error && node seed.js \"$$@\"", "--"]
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        'npm install --no-audit --no-fund --loglevel=error && node seed.js "$$@"',
+        "--",
+      ]
     depends_on:
       db:
         condition: service_healthy
